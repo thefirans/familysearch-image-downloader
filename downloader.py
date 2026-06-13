@@ -80,11 +80,11 @@ def parse_familysearch_url(raw_url: str) -> DocumentLink:
 
     match = re.search(r"/ark:/61903/(3:1:[A-Za-z0-9-]+)", cleaned)
     if not match:
-        raise DownloadError("Не найден идентификатор FamilySearch формата 3:1:...")
+        raise DownloadError("Could not find a FamilySearch identifier in the 3:1:... format.")
 
     parsed = urlparse(cleaned)
     if parsed.hostname not in {"familysearch.org", "www.familysearch.org"}:
-        raise DownloadError("Поддерживаются только ссылки с сайта familysearch.org")
+        raise DownloadError("Only familysearch.org links are supported.")
 
     query = parse_qs(parsed.query)
     index = None
@@ -147,7 +147,7 @@ def _safe_storage_password(service: str) -> bytes:
     )
     if result.returncode != 0:
         raise DownloadError(
-            f"Не удалось прочитать ключ '{service}' из Связки ключей macOS."
+            f"Could not read '{service}' from the macOS Keychain."
         )
     return result.stdout.rstrip(b"\n")
 
@@ -203,8 +203,8 @@ def _cookie_header(profile: BrowserProfile) -> str:
 
     if not cookies:
         raise DownloadError(
-            f"В профиле '{profile.label}' не найдены cookies FamilySearch. "
-            "Откройте FamilySearch в этом браузере и войдите в аккаунт."
+            f"No FamilySearch cookies were found in '{profile.label}'. "
+            "Open FamilySearch in that browser and sign in."
         )
     return "; ".join(cookies)
 
@@ -214,9 +214,9 @@ def normalize_cookie_header(raw_cookie_header: str) -> str:
     if value.lower().startswith("cookie:"):
         value = value.split(":", 1)[1].strip()
     if "\r" in value or "\n" in value:
-        raise DownloadError("Cookie header должен быть одной строкой.")
+        raise DownloadError("The Cookie header must be a single line.")
     if "=" not in value:
-        raise DownloadError("Cookie header не похож на строку cookies FamilySearch.")
+        raise DownloadError("The value does not look like a FamilySearch Cookie header.")
     return value
 
 
@@ -244,8 +244,8 @@ class TileClient:
         )
         if response.status_code in {401, 403}:
             raise DownloadError(
-                "FamilySearch отклонил авторизацию. Обновите страницу документа и "
-                "повторно получите Cookie header или войдите в выбранном браузере."
+                "FamilySearch rejected the session. Refresh the document page and copy "
+                "a new Cookie header, or sign in using the selected browser."
             )
         if response.status_code == 404:
             raise FileNotFoundError
@@ -260,7 +260,7 @@ class TileClient:
         try:
             size = Image.open(io.BytesIO(data)).size
         except Exception as error:
-            raise DownloadError("FamilySearch вернул поврежденную плитку изображения.") from error
+            raise DownloadError("FamilySearch returned an invalid image tile.") from error
         return data, size
 
 
@@ -284,8 +284,8 @@ def _find_working_client(
 
     details = "\n".join(errors[-3:])
     raise DownloadError(
-        "Не удалось использовать активный вход FamilySearch ни в одном браузере.\n"
-        "Откройте документ в Chrome, войдите в аккаунт и повторите попытку."
+        "Could not use an active FamilySearch session from any browser.\n"
+        "Open the document in Chrome, sign in, and try again."
         + (f"\n\n{details}" if details else "")
     )
 
@@ -298,7 +298,7 @@ def _detect_level(client: TileClient) -> int:
         elif highest is not None:
             break
     if highest is None:
-        raise DownloadError("Не удалось найти DeepZoom-плитки этого документа.")
+        raise DownloadError("Could not find DeepZoom tiles for this document.")
     return highest
 
 
@@ -324,9 +324,9 @@ def _detect_grid(
         rows = row + 1
 
     if not columns or not rows:
-        raise DownloadError("Не удалось определить размер сетки изображения.")
+        raise DownloadError("Could not determine the image tile grid.")
     if columns * rows > MAX_TILES:
-        raise DownloadError("Изображение содержит слишком много плиток для безопасной обработки.")
+        raise DownloadError("The image contains too many tiles to process safely.")
     return columns, rows
 
 
@@ -345,34 +345,35 @@ def download_document(
         if progress:
             progress(max(0.0, min(1.0, value)), message)
 
-    report(0.02, "Проверяю вход в FamilySearch")
+    report(0.02, "Checking the FamilySearch session")
     if cookie_header:
         auth_source = "Cookie header"
         client = TileClient(document, normalize_cookie_header(cookie_header))
         try:
             if client.probe(8, 0, 0) is None:
-                raise DownloadError("Не удалось открыть изображение с указанными cookies.")
+                raise DownloadError("Could not open the image with the supplied cookies.")
         except requests.RequestException as error:
-            raise DownloadError(f"Ошибка соединения с FamilySearch: {error}") from error
+            raise DownloadError(f"Could not connect to FamilySearch: {error}") from error
     else:
         profiles = discover_browser_profiles()
         if not profiles:
             raise DownloadError(
-                "На этом сервере нет локального браузера. Вставьте Cookie header FamilySearch."
+                "No supported local browser is available on this server. "
+                "Paste a FamilySearch Cookie header instead."
             )
         client, profile = _find_working_client(document, profiles, preferred_profile)
         auth_source = profile.label
-    report(0.08, f"Используется {auth_source}")
+    report(0.08, f"Using {auth_source}")
 
     level = _detect_level(client)
-    report(0.13, f"Найден максимальный уровень качества: {level}")
+    report(0.13, f"Highest available quality level: {level}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="familysearch-tiles-") as temp_dir:
         tile_dir = Path(temp_dir)
         columns, rows = _detect_grid(client, level, tile_dir)
         total = columns * rows
-        report(0.18, f"Сетка {columns} x {rows}, плиток: {total}")
+        report(0.18, f"Tile grid: {columns} x {rows} ({total} tiles)")
 
         def fetch(column: int, row: int) -> Path:
             path = tile_dir / f"{column}_{row}.jpg"
@@ -389,7 +390,7 @@ def download_document(
                 except Exception as error:
                     last_error = error
                     time.sleep(0.35 * (attempt + 1))
-            raise DownloadError(f"Не удалось скачать плитку {column}_{row}: {last_error}")
+            raise DownloadError(f"Could not download tile {column}_{row}: {last_error}")
 
         jobs = [(column, row) for row in range(rows) for column in range(columns)]
         completed = 0
@@ -400,7 +401,7 @@ def download_document(
                 completed += 1
                 report(
                     0.18 + 0.65 * completed / total,
-                    f"Скачано плиток: {completed} / {total}",
+                    f"Downloaded tiles: {completed} / {total}",
                 )
 
         last_width = Image.open(tile_dir / f"{columns - 1}_0.jpg").size[0]
@@ -416,9 +417,9 @@ def download_document(
             else (rows - 1) * TILE_SIZE - TILE_OVERLAP + last_height
         )
         if width <= 0 or height <= 0 or width * height > 250_000_000:
-            raise DownloadError("Получен некорректный размер итогового изображения.")
+            raise DownloadError("The assembled image has invalid dimensions.")
 
-        report(0.88, f"Склеиваю изображение {width} x {height}")
+        report(0.88, f"Assembling image: {width} x {height}")
         canvas = Image.new("RGB", (width, height), "black")
         for row in range(rows):
             for column in range(columns):
@@ -436,7 +437,7 @@ def download_document(
             optimize=True,
         )
 
-    report(1.0, "Готово")
+    report(1.0, "Done")
     return DownloadResult(
         path=output_path,
         width=width,

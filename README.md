@@ -1,47 +1,47 @@
 # FamilySearch Image Downloader
 
-Streamlit-приложение для загрузки DeepZoom-плиток FamilySearch и сборки полного
-документа в один JPEG-файл.
+A Streamlit application that downloads FamilySearch DeepZoom tiles and assembles
+an entire document image into a single JPEG file.
 
-## Streamlit Community Cloud
+## Deploy on Streamlit Community Cloud
 
-1. Откройте [share.streamlit.io](https://share.streamlit.io/).
-2. Нажмите **Create app** и выберите этот GitHub-репозиторий.
-3. Укажите ветку `main` и файл `app.py`.
-4. Нажмите **Deploy**. Дополнительные системные пакеты и secrets не нужны.
+1. Open [share.streamlit.io](https://share.streamlit.io/).
+2. Select **Create app** and choose this GitHub repository.
+3. Select the `main` branch and set the entrypoint to `app.py`.
+4. Select **Deploy**. No system packages or Streamlit secrets are required.
 
-В облаке выберите `Cookie header`. Чтобы получить его:
+Select `Cookie header` when running in the cloud. To obtain the header:
 
-1. Откройте нужный документ FamilySearch в Chrome и войдите в аккаунт.
-2. Откройте DevTools (`Cmd+Option+I`) и вкладку **Network**.
-3. Обновите страницу, выберите запрос, содержащий `image_files`.
-4. В **Request Headers** скопируйте значение заголовка `Cookie`.
-5. Вставьте его в защищенное поле приложения.
+1. Open the required FamilySearch document in Chrome and sign in.
+2. Open DevTools (`Cmd+Option+I`) and select the **Network** tab.
+3. Refresh the page and select a request containing `image_files`.
+4. In **Request Headers**, copy the value of the `Cookie` header.
+5. Paste that value into the application's password-protected input.
 
-Cookie используется только в памяти текущей Streamlit-сессии и не записывается
-в файлы, логи или GitHub. Разворачивайте приложение как private app и не
-передавайте cookie другим людям.
+The Cookie header is kept only in memory for the current Streamlit session. It
+is not written to files, logs, or GitHub. Deploy the application as a private app
+and do not share your Cookie header with anyone.
 
-## Локальный запуск на macOS
+## Run locally on macOS
 
-Локально приложение умеет автоматически использовать активный вход из Chrome,
-Chrome Canary, Edge или Brave.
+When running locally, the application can automatically use an active
+FamilySearch session from Chrome, Chrome Canary, Edge, or Brave.
 
 ```bash
 ./run.command
 ```
 
-После запуска откройте [http://127.0.0.1:8501](http://127.0.0.1:8501).
+Open [http://127.0.0.1:8501](http://127.0.0.1:8501) after the server starts.
 
-## Ограничение авторизации
+## Authentication limitation
 
-Streamlit Cloud не может читать cookies локального браузера из-за изоляции
-доменов и серверной архитектуры. Официальная интеграция FamilySearch требует
-зарегистрированного OAuth app key, redirect URI и допуска к production. Доступ
-сторонних приложений к историческим изображениям также ограничен FamilySearch,
-поэтому облачный режим использует временную пользовательскую web-сессию.
+Streamlit Community Cloud cannot read cookies from a user's local browser because
+the application runs on a remote server and under a different domain. An official
+FamilySearch integration requires a registered OAuth application key, a redirect
+URI, and production approval. FamilySearch also restricts third-party access to
+historical record images, so the cloud mode uses the user's temporary web session.
 
-Официальная документация:
+Official documentation:
 
 - [FamilySearch Authentication](https://developers.familysearch.org/main/docs/authentication)
 - [FamilySearch Getting Started](https://developers.familysearch.org/main/docs/getting-started)

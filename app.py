@@ -30,15 +30,15 @@ profile_labels = [profile.label for profile in profiles]
 
 if profiles:
     auth_mode = st.radio(
-        "Авторизация",
-        ["Локальный браузер", "Cookie header"],
+        "Authentication",
+        ["Local browser", "Cookie header"],
         horizontal=True,
     )
 else:
     auth_mode = "Cookie header"
 
 cookie_header = ""
-selected_profile = "Автоматически"
+selected_profile = "Automatic"
 
 if auth_mode == "Cookie header":
     cookie_header = st.text_input(
@@ -46,32 +46,32 @@ if auth_mode == "Cookie header":
         type="password",
         placeholder="fssessionid=...; cf_clearance=...; ...",
         help=(
-            "Откройте документ FamilySearch, DevTools > Network, обновите страницу, "
-            "выберите запрос image_files и скопируйте значение Request Header 'Cookie'. "
-            "Значение хранится только в памяти текущей сессии."
+            "Open the FamilySearch document, go to DevTools > Network, refresh the page, "
+            "select an image_files request, and copy the Cookie request header value. "
+            "The value is kept only in memory for the current session."
         ),
     )
 
-with st.expander("Настройки", expanded=False):
-    if auth_mode == "Локальный браузер":
+with st.expander("Settings", expanded=False):
+    if auth_mode == "Local browser":
         selected_profile = st.selectbox(
-            "Профиль браузера",
-            ["Автоматически", *profile_labels],
-            help="В выбранном профиле должен быть выполнен вход на FamilySearch.",
+            "Browser profile",
+            ["Automatic", *profile_labels],
+            help="The selected browser profile must be signed in to FamilySearch.",
         )
-    jpeg_quality = st.slider("Качество JPEG", 80, 100, 95)
-    workers = st.slider("Параллельные загрузки", 2, 16, 10)
+    jpeg_quality = st.slider("JPEG quality", 80, 100, 95)
+    workers = st.slider("Parallel downloads", 2, 16, 10)
 
 url = st.text_input(
-    "Ссылка на документ",
+    "Document URL",
     placeholder="https://www.familysearch.org/ark:/61903/3:1:...?i=...",
 )
 
-if st.button("Скачать и склеить", type="primary", width="stretch"):
+if st.button("Download and assemble", type="primary", width="stretch"):
     if not url.strip():
-        st.warning("Вставьте ссылку FamilySearch.")
+        st.warning("Paste a FamilySearch document URL.")
     elif auth_mode == "Cookie header" and not cookie_header.strip():
-        st.warning("Вставьте Cookie header FamilySearch.")
+        st.warning("Paste a FamilySearch Cookie header.")
     else:
         progress_bar = st.progress(0.0)
         status = st.empty()
@@ -84,7 +84,7 @@ if st.button("Скачать и склеить", type="primary", width="stretch"
             result = download_document(
                 url,
                 DOWNLOAD_DIR,
-                preferred_profile=None if selected_profile == "Автоматически" else selected_profile,
+                preferred_profile=None if selected_profile == "Automatic" else selected_profile,
                 cookie_header=cookie_header if auth_mode == "Cookie header" else None,
                 jpeg_quality=jpeg_quality,
                 workers=workers,
@@ -97,7 +97,7 @@ if st.button("Скачать и склеить", type="primary", width="stretch"
         except Exception as error:
             status.empty()
             progress_bar.empty()
-            st.error(f"Неожиданная ошибка: {error}")
+            st.error(f"Unexpected error: {error}")
         else:
             image_bytes = result.path.read_bytes()
             st.session_state["last_result"] = {
@@ -108,17 +108,17 @@ if st.button("Скачать и склеить", type="primary", width="stretch"
                 "tiles": result.columns * result.rows,
                 "profile": result.browser_profile,
             }
-            status.success("Документ готов")
+            status.success("Document ready")
 
 if "last_result" in st.session_state:
     result = st.session_state["last_result"]
     st.image(result["bytes"], caption=result["name"], width="stretch")
     st.caption(
         f'{result["width"]} x {result["height"]} px · '
-        f'{result["tiles"]} плиток · {result["profile"]}'
+        f'{result["tiles"]} tiles · {result["profile"]}'
     )
     st.download_button(
-        "Скачать JPEG",
+        "Download JPEG",
         data=result["bytes"],
         file_name=result["name"],
         mime="image/jpeg",
