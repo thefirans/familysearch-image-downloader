@@ -1,0 +1,4 @@
+streamlit>=1.40,<2
+Pillow>=11,<13
+pycryptodome>=3.20,<4
+requests>=2.32,<3
