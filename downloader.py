@@ -8,9 +8,11 @@ import shutil
 import sqlite3
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, unquote, urlparse
@@ -61,6 +63,8 @@ class BrowserProfile:
     label: str
     cookie_db: Path
     keychain_service: str
+    session_score: int = 0
+    modified_at: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -133,12 +137,44 @@ def discover_browser_profiles() -> list[BrowserProfile]:
                 profile_name = "Default" if profile_dir.name == "Default" else profile_dir.name
                 profiles.append(
                     BrowserProfile(
-                        f"{browser_name} - {profile_name}", cookie_db, keychain_service
+                        f"{browser_name} - {profile_name}",
+                        cookie_db,
+                        keychain_service,
+                        session_score=_familysearch_cookie_score(cookie_db),
+                        modified_at=cookie_db.stat().st_mtime,
                     )
                 )
-    return profiles
+    return sorted(
+        profiles,
+        key=lambda profile: (profile.session_score, profile.modified_at),
+        reverse=True,
+    )
 
 
+def _familysearch_cookie_score(cookie_db: Path) -> int:
+    try:
+        connection = sqlite3.connect(f"file:{cookie_db}?mode=ro", uri=True, timeout=1)
+        try:
+            row = connection.execute(
+                """
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN name IN (
+                        'fssessionid', 'JSESSIONID', 'SESSION', 'cf_clearance'
+                    ) THEN 1 ELSE 0 END)
+                FROM cookies
+                WHERE host_key LIKE '%familysearch.org%'
+                """
+            ).fetchone()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return 0
+    total, session_cookies = row or (0, 0)
+    return int(total or 0) + 100 * int(session_cookies or 0)
+
+
+@lru_cache(maxsize=8)
 def _safe_storage_password(service: str) -> bytes:
     result = subprocess.run(
         ["security", "find-generic-password", "-w", "-s", service],
@@ -178,7 +214,10 @@ def _cookie_header(profile: BrowserProfile) -> str:
 
     with tempfile.TemporaryDirectory(prefix="familysearch-cookies-") as temp_dir:
         copied_db = Path(temp_dir) / "Cookies"
-        shutil.copy2(profile.cookie_db, copied_db)
+        for suffix in ("", "-wal", "-shm"):
+            source = Path(f"{profile.cookie_db}{suffix}")
+            if source.exists():
+                shutil.copy2(source, Path(f"{copied_db}{suffix}"))
         connection = sqlite3.connect(copied_db)
         try:
             rows = connection.execute(
@@ -228,6 +267,15 @@ class TileClient:
             "Referer": document.original_url,
             "User-Agent": USER_AGENT,
         }
+        self._thread_local = threading.local()
+
+    def _session(self) -> requests.Session:
+        session = getattr(self._thread_local, "session", None)
+        if session is None:
+            session = requests.Session()
+            session.headers.update(self.headers)
+            self._thread_local.session = session
+        return session
 
     def tile_url(self, level: int, column: int, row: int) -> str:
         return (
@@ -237,9 +285,8 @@ class TileClient:
         )
 
     def get_tile(self, level: int, column: int, row: int, timeout: int = 25) -> bytes:
-        response = requests.get(
+        response = self._session().get(
             self.tile_url(level, column, row),
-            headers=self.headers,
             timeout=timeout,
         )
         if response.status_code in {401, 403}:
@@ -282,46 +329,58 @@ def _find_working_client(
         except Exception as error:
             errors.append(f"{profile.label}: {error}")
 
-    details = "\n".join(errors[-3:])
     raise DownloadError(
-        "Could not use an active FamilySearch session from any browser.\n"
-        "Open the document in Chrome, sign in, and try again."
-        + (f"\n\n{details}" if details else "")
+        "No active FamilySearch session was found. Open FamilySearch in Chrome, "
+        "sign in once, and try the download again."
     )
 
 
 def _detect_level(client: TileClient) -> int:
-    highest = None
-    for level in range(0, 19):
+    for level in range(18, -1, -1):
         if client.probe(level, 0, 0) is not None:
-            highest = level
-        elif highest is not None:
-            break
-    if highest is None:
-        raise DownloadError("Could not find DeepZoom tiles for this document.")
-    return highest
+            return level
+    raise DownloadError("Could not find DeepZoom tiles for this document.")
+
+
+def _detect_axis_length(
+    client: TileClient,
+    level: int,
+    tile_dir: Path,
+    axis: str,
+) -> int:
+    def probe(index: int) -> bool:
+        column, row = (index, 0) if axis == "columns" else (0, index)
+        result = client.probe(level, column, row)
+        if result is None:
+            return False
+        data, _ = result
+        (tile_dir / f"{column}_{row}.jpg").write_bytes(data)
+        return True
+
+    if not probe(0):
+        return 0
+
+    lower = 0
+    upper = 1
+    while upper < MAX_GRID_SIDE and probe(upper):
+        lower = upper
+        upper *= 2
+    upper = min(upper, MAX_GRID_SIDE)
+
+    while lower + 1 < upper:
+        middle = (lower + upper) // 2
+        if probe(middle):
+            lower = middle
+        else:
+            upper = middle
+    return lower + 1
 
 
 def _detect_grid(
     client: TileClient, level: int, tile_dir: Path
 ) -> tuple[int, int]:
-    columns = 0
-    for column in range(MAX_GRID_SIDE):
-        result = client.probe(level, column, 0)
-        if result is None:
-            break
-        data, _ = result
-        (tile_dir / f"{column}_0.jpg").write_bytes(data)
-        columns = column + 1
-
-    rows = 0
-    for row in range(MAX_GRID_SIDE):
-        result = client.probe(level, 0, row)
-        if result is None:
-            break
-        data, _ = result
-        (tile_dir / f"0_{row}.jpg").write_bytes(data)
-        rows = row + 1
+    columns = _detect_axis_length(client, level, tile_dir, "columns")
+    rows = _detect_axis_length(client, level, tile_dir, "rows")
 
     if not columns or not rows:
         raise DownloadError("Could not determine the image tile grid.")

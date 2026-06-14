@@ -1,6 +1,13 @@
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from downloader import DownloadError, normalize_cookie_header, parse_familysearch_url
+from downloader import (
+    DownloadError,
+    _detect_axis_length,
+    normalize_cookie_header,
+    parse_familysearch_url,
+)
 
 
 class ParseFamilySearchUrlTests(unittest.TestCase):
@@ -41,6 +48,41 @@ class CookieHeaderTests(unittest.TestCase):
     def test_rejects_multiline_header(self) -> None:
         with self.assertRaises(DownloadError):
             normalize_cookie_header("fssessionid=abc\nInjected: value")
+
+
+class FakeTileClient:
+    def __init__(self, columns: int, rows: int) -> None:
+        self.columns = columns
+        self.rows = rows
+
+    def probe(self, level: int, column: int, row: int):
+        if column >= self.columns or row >= self.rows:
+            return None
+        return b"tile", (256, 256)
+
+
+class GridDetectionTests(unittest.TestCase):
+    def test_detects_columns_with_bounded_probes(self) -> None:
+        with TemporaryDirectory() as directory:
+            columns = _detect_axis_length(
+                FakeTileClient(columns=17, rows=13),
+                level=13,
+                tile_dir=Path(directory),
+                axis="columns",
+            )
+
+        self.assertEqual(columns, 17)
+
+    def test_detects_rows_with_bounded_probes(self) -> None:
+        with TemporaryDirectory() as directory:
+            rows = _detect_axis_length(
+                FakeTileClient(columns=17, rows=13),
+                level=13,
+                tile_dir=Path(directory),
+                axis="rows",
+            )
+
+        self.assertEqual(rows, 13)
 
 
 if __name__ == "__main__":
